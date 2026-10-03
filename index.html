@@ -91,6 +91,17 @@ button.on{color:var(--glow)}
 .fv.on,.tools button.on{color:var(--glow);opacity:1}
 .fv svg,.tools svg{width:18px;height:18px}
 @media(max-width:820px){.ov{align-items:flex-end}.sheet{border-radius:28px 28px 0 0}}
+@media(min-width:821px) and (min-height:560px){
+ html,body{overflow:hidden}
+ .app{height:100dvh;min-height:0;max-width:1320px;padding:14px 32px 22px;gap:14px 44px;grid-template-columns:minmax(0,1.15fr) minmax(0,.85fr);grid-template-rows:auto minmax(0,1fr);align-items:stretch}
+ .now{min-height:0;gap:clamp(10px,2vh,20px)}
+ .cover{aspect-ratio:auto;max-width:none;width:100%;flex:1 1 0;min-height:120px}
+ .meta h1{font-size:clamp(24px,4.4vh,42px)}
+ .meta p{font-size:clamp(14px,2vh,18px);margin-top:6px}
+ .controls,.vol{max-width:none}
+ .vol input{max-width:280px}
+ .side{height:100%;max-height:none;min-height:0}
+}
 </style>
 </head>
 <body>
