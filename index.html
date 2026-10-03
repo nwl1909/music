@@ -248,45 +248,73 @@ async function loadLibrary(){
     const seg=location.pathname.split('/')[1]||'';
     repo=seg&&!seg.includes('.')?seg:h;
   }
-  let names=[],folder=CONFIG.folder,why='',shaMap=null;
+  let names=[],folder=CONFIG.folder,why='',shaMap=null,soft=false,rem=0;
   const isAudio=f=>f.type==='file'&&/\.(mp3|wav)$/i.test(f.name);
-  if(!owner)why='Адрес сайта не github.io: укажите owner и repo в CONFIG или создайте music/tracks.json';
+  /* основной источник: music/tracks.json (его собирает workflow при каждой публикации, новые сверху) */
+  try{
+    const r=await fetch(`${CONFIG.folder}/tracks.json`,{cache:'no-cache'});
+    if(r.ok){const j=await r.json();if(Array.isArray(j)&&j.length)names=j.filter(x=>typeof x==='string')}
+  }catch{}
+  if(names.length){/* список получен без обращения к GitHub API */}
+  else if(!owner)why='Адрес сайта не github.io: укажите owner и repo в CONFIG или создайте music/tracks.json';
   else{
     try{
       const api=`https://api.github.com/repos/${owner}/${repo}/contents`;
       let r=await fetch(`${api}/${folder}`);
       if(r.status===404){
-        const root=r.ok?[]:await (await fetch(api)).json().catch(()=>[]);
+        const root=await (await fetch(api)).json().catch(()=>[]);
         const dir=Array.isArray(root)&&root.find(f=>f.type==='dir'&&f.name.toLowerCase()===folder.toLowerCase());
         if(dir){folder=dir.name;r=await fetch(`${api}/${folder}`)}
       }
-      if(r.ok){const it=(await r.json()).filter(isAudio);names=it.map(f=>f.name);shaMap=Object.fromEntries(it.map(f=>[f.name,f.sha]));if(!names.length)why='В папке '+folder+' нет файлов mp3 или wav'}
-      else why=r.status===404?`Папка ${folder} не найдена в репозитории ${owner}/${repo} (она должна лежать рядом с index.html)`
-        :r.status===403?'Лимит запросов GitHub API: подождите час или создайте music/tracks.json':'Ошибка GitHub API: '+r.status;
-    }catch{why='Нет связи с GitHub API'}
+      const h=r.headers.get('x-ratelimit-remaining');if(h!==null)rem=+h;
+      if(r.ok){
+        const it=(await r.json()).filter(isAudio);names=it.map(f=>f.name);
+        shaMap=Object.fromEntries(it.map(f=>[f.name,f.sha]));
+        if(names.length)put('pl_list',{folder,names,sha:shaMap});else why='В папке '+folder+' нет файлов mp3 или wav';
+      }else if(r.status===403||r.status===429){soft=true;why='Лимит запросов GitHub API: подождите час или создайте music/tracks.json'}
+      else why=r.status===404?`Папка ${folder} не найдена в репозитории ${owner}/${repo} (она должна лежать рядом с index.html)`:'Ошибка GitHub API: '+r.status;
+    }catch{soft=true;why='Нет связи с GitHub API'}
+  }
+  if(!names.length&&soft){
+    const c=get('pl_list',null);
+    if(c&&c.names&&c.names.length){names=c.names;folder=c.folder;shaMap=c.sha;why=''}
+  }
+  if(!names.length&&soft){
+    for(const br of ['main','master']){
+      try{
+        const j=await (await fetch(`https://data.jsdelivr.com/v1/packages/gh/${owner}/${repo}@${br}?structure=flat`)).json();
+        const pre='/'+folder+'/';
+        const f=(j.files||[]).map(x=>x.name).filter(x=>x.startsWith(pre)&&!x.slice(pre.length).includes('/')&&/\.(mp3|wav)$/i.test(x)).map(x=>x.slice(pre.length));
+        if(f.length){names=f;why='';break}
+      }catch{}
+    }
   }
   if(!names.length){
     try{const j=await (await fetch(`${CONFIG.folder}/tracks.json`)).json();if(Array.isArray(j)&&j.length){names=j;folder=CONFIG.folder}}catch{}
   }
   if(shaMap){
-    /* дата добавления = дата последнего коммита файла; кэшируется по sha, чтобы не тратить лимит API */
-    const dc=get('pl_dates',{}),need=names.filter(n=>!dc[shaMap[n]]);
-    await Promise.race([
-      Promise.all(need.map(async n=>{
-        try{
-          const r=await fetch(`https://api.github.com/repos/${owner}/${repo}/commits?path=${encodeURIComponent(folder+'/'+n)}&per_page=1`);
-          if(!r.ok)return;
-          const j=await r.json(),d=j[0]&&j[0].commit.committer.date;
-          if(d){dc[shaMap[n]]=d;put('pl_dates',dc)}
-        }catch{}
-      })),
-      new Promise(r=>setTimeout(r,6000))
-    ]);
+    const dc=get('pl_dates',{});
     names.sort((a,b)=>(dc[shaMap[b]]||'').localeCompare(dc[shaMap[a]]||'')||a.localeCompare(b,'ru',{numeric:true}));
   }
   for(const n of names){
     const url=`${folder}/${encodeURIComponent(n)}`;
     await pushTrack(url,url,n);
+  }
+  if(shaMap&&tracks.length&&rem>=25){
+    /* даты новых файлов: не больше 12 запросов за визит и только пока есть запас лимита API */
+    const dc=get('pl_dates',{}),need=tracks.filter(t=>!dc[shaMap[t.key]]).slice(0,Math.min(12,rem-20));
+    if(need.length)Promise.all(need.map(async t=>{
+      try{
+        const r=await fetch(`https://api.github.com/repos/${owner}/${repo}/commits?path=${encodeURIComponent(folder+'/'+t.key)}&per_page=1`);
+        if(!r.ok)return;
+        const j=await r.json(),d=j[0]&&j[0].commit.committer.date;
+        if(d){dc[shaMap[t.key]]=d;put('pl_dates',dc)}
+      }catch{}
+    })).then(()=>{
+      const cur=tracks[idx];
+      tracks.sort((a,b)=>(dc[shaMap[b.key]]||'').localeCompare(dc[shaMap[a.key]]||'')||a.key.localeCompare(b.key,'ru',{numeric:true}));
+      idx=cur?tracks.indexOf(cur):-1;render();
+    });
   }
   if(!tracks.length){$('title').textContent='Треков пока нет';$('artist').textContent=why||'Добавьте файлы в папку music'}
   else{
