@@ -120,7 +120,9 @@ button.on{color:var(--glow)}
 body.playing .play{animation:ring 1.8s ease-out infinite}
 .play{transition:transform .15s,background .2s,box-shadow .3s}.play:hover{transform:scale(1.07)}
 .item{transition:background .25s,transform .25s,box-shadow .25s}
-.item:hover{transform:translateX(5px)}
+.item:hover{transform:none}
+.item:hover>:nth-child(2){transform:translateX(5px)}
+.item>:nth-child(2){transition:transform .25s}
 .item.cur{box-shadow:inset 3px 0 0 var(--glow)}
 .item .t{transition:transform .25s}.item:hover .t{transform:scale(1.08) rotate(-3deg)}
 .t.eqon{display:flex;gap:3px;align-items:flex-end;justify-content:center;padding-bottom:12px}
