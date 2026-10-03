@@ -141,12 +141,20 @@ input[type=range]:hover::-webkit-slider-thumb{transform:scale(1.3)}
 .dl svg{width:18px;height:18px;fill:currentColor}
 .dl:focus-visible{outline:2px solid var(--text);outline-offset:2px}
 @media(max-width:820px){.item{gap:6px}}
+#bg{position:fixed;inset:0;width:100%;height:100%;z-index:0;pointer-events:none;display:none}
+body.gl #bg{display:block}
+body.gl .ambient{display:none}
+.fxbtn{width:auto;height:auto;display:inline-flex;color:var(--text);border:1px solid var(--line);font-weight:500;cursor:pointer;transition:background .25s,color .25s}
+.fxbtn:hover{background:color-mix(in srgb,var(--glow) 30%,var(--panel))}
+.fxbtn.on{background:var(--glow);color:#14101f;border-color:transparent}
+.row input[type=range]:disabled{opacity:.4;cursor:not-allowed}
 </style>
 </head>
 <body>
 <div class="ambient" id="amb"></div>
+<canvas id="bg" aria-hidden="true"></canvas>
 <main class="app">
-  <header class="top"><span class="badge" id="sleepBadge" hidden></span><button id="gear" aria-label="Настройки" title="Настройки"><svg viewBox="0 0 24 24"><path d="M19.4 13c.1-.3.1-.7.1-1s0-.7-.1-1l2.1-1.6c.2-.2.2-.4.1-.6l-2-3.5c-.1-.2-.4-.3-.6-.2l-2.5 1c-.5-.4-1.1-.7-1.7-1l-.4-2.6c0-.2-.2-.4-.5-.4h-4c-.3 0-.5.2-.5.4L9.1 5.1c-.6.3-1.200.6-1.700 1l-2.500-1c-.2-.1-.5 0-.6.2l-2 3.500c-.1.200-.1.500.1.600L4.500 11c0 .3-.1.700-.1 1s0 .7.1 1l-2.100 1.600c-.2.200-.2.400-.1.600l2 3.500c.1.200.4.300.6.200l2.500-1c.5.400 1.100.7 1.700 1l.4 2.600c0 .2.200.4.500.4h4c.3 0 .5-.2.500-.4l.4-2.600c.6-.3 1.200-.6 1.700-1l2.500 1c.2.100.5 0 .6-.2l2-3.500c.1-.2.1-.5-.1-.6L19.400 13zM12 15.500a3.500 3.500 0 1 1 0-7 3.500 3.500 0 0 1 0 7z"/></svg></button></header>
+  <header class="top"><span class="badge" id="sleepBadge" hidden></span><button id="fxBtn" class="badge fxbtn" title="Режим звука (E)" aria-label="Режим звука"></button><button id="gear" aria-label="Настройки" title="Настройки"><svg viewBox="0 0 24 24"><path d="M19.4 13c.1-.3.1-.7.1-1s0-.7-.1-1l2.1-1.6c.2-.2.2-.4.1-.6l-2-3.5c-.1-.2-.4-.3-.6-.2l-2.5 1c-.5-.4-1.1-.7-1.7-1l-.4-2.6c0-.2-.2-.4-.5-.4h-4c-.3 0-.5.2-.5.4L9.1 5.1c-.6.3-1.200.6-1.700 1l-2.500-1c-.2-.1-.5 0-.6.2l-2 3.500c-.1.200-.1.500.1.600L4.500 11c0 .3-.1.700-.1 1s0 .7.1 1l-2.100 1.600c-.2.200-.2.400-.1.600l2 3.500c.1.200.4.300.6.200l2.500-1c.5.400 1.100.7 1.700 1l.4 2.600c0 .2.200.4.500.4h4c.3 0 .5-.2.500-.4l.4-2.600c.6-.3 1.200-.6 1.700-1l2.500 1c.2.100.5 0 .6-.2l2-3.500c.1-.2.1-.5-.1-.6L19.400 13zM12 15.500a3.500 3.500 0 1 1 0-7 3.500 3.500 0 0 1 0 7z"/></svg></button></header>
   <section class="now">
     <div class="cover" id="cover"><canvas id="viz"></canvas></div>
     <div class="meta"><h1 id="title">Загрузка…</h1><p id="artist">Ищу треки в папке music</p></div>
@@ -172,8 +180,10 @@ input[type=range]:hover::-webkit-slider-thumb{transform:scale(1.3)}
   <div class="sh"><h2>Настройки</h2><button id="cls" aria-label="Закрыть"><svg viewBox="0 0 24 24"><path d="M19 6.400 17.600 5 12 10.600 6.400 5 5 6.400 10.600 12 5 17.600 6.400 19 12 13.400 17.600 19 19 17.600 13.400 12z"/></svg></button></div>
   <div class="row"><label>Цвет оформления</label><div class="themes" id="themes"></div></div>
   <div class="row"><label>Визуализация</label><div class="seg" id="vizseg"></div></div>
+  <div class="row"><label>Фон</label><div class="seg" id="bgseg"></div></div>
   <div class="row"><label>Сила подсветки под бит <b id="glv"></b></label><input type="range" id="gl" min="0" max="200" step="5"></div>
   <div class="row"><label>После окончания трека</label><div class="seg" id="autoseg"></div></div>
+  <div class="row"><label>Режим звука</label><div class="seg" id="fxseg"></div></div>
   <div class="row"><label>Скорость <b id="spv"></b></label><input type="range" id="sp" min="50" max="200" step="5"></div>
   <div class="row"><label>Бас <b id="bsv"></b></label><input type="range" id="bs" min="-12" max="12" step="1"></div>
   <div class="row"><label>Высокие <b id="trv"></b></label><input type="range" id="tr" min="-12" max="12" step="1"></div>
@@ -191,7 +201,7 @@ const ICON={play:'<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>',paus
  x:'<svg viewBox="0 0 24 24"><path d="M19 6.400L17.600 5 12 10.600 6.400 5 5 6.400 10.600 12 5 17.600 6.400 19 12 13.400 17.600 19 19 17.600 13.400 12z"/></svg>'};
 const get=(k,d)=>{try{return JSON.parse(localStorage.getItem(k))??d}catch{return d}};
 const put=(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v))}catch{}};
-const ST={theme:0,viz:0,speed:1,bass:0,treb:0,vol:.8,shuf:false,rep:0,auto:true,glow:1,...get('pl_st',{})};
+const ST={theme:0,viz:0,speed:1,bass:0,treb:0,vol:.8,shuf:false,rep:0,auto:true,glow:1,fx:0,bgfx:0,...get('pl_st',{})};
 const save=()=>put('pl_st',ST);
 const favs=new Set(get('pl_fav',[]));
 const DL='<svg viewBox="0 0 24 24"><path d="M5 20h14v-2H5v2zM19 9h-4V3H9v6H5l7 7 7-7z"/></svg>';
@@ -359,7 +369,7 @@ function render(){
 function load(i,play){
   idx=i;const t=tracks[i];
   const mt=document.querySelector('.meta');mt.classList.remove('swap');void mt.offsetWidth;mt.classList.add('swap');
-  audio.src=t.url;audio.playbackRate=ST.speed;
+  audio.src=t.url;applyRate();
   $('title').textContent=t.title;$('artist').textContent=t.artist;
   document.title=`${t.title} — ${t.artist}`;
   if('mediaSession' in navigator){
@@ -426,6 +436,7 @@ document.addEventListener('keydown',e=>{
   else if(k==='m')$('mute').click();
   else if(k==='s')$('shuf').click();
   else if(k==='r')$('rep').click();
+  else if(k==='e')cycleFx();
 });
 if('mediaSession' in navigator){
   navigator.mediaSession.setActionHandler('play',()=>audio.play());
@@ -448,7 +459,22 @@ shuffle=ST.shuf;$('shuf').classList.toggle('on',shuffle);
 repeat=ST.rep;$('rep').innerHTML=repeat===2?ICON.rep1:ICON.rep;$('rep').classList.toggle('on',repeat>0);
 
 /* звук: эквалайзер и анализатор */
-let ac,an,bassF,trebF;
+let ac,an,bassF,trebF,fx=null;
+/* режимы звука: slowed+reverb, nightcore, 8D */
+const FX=[
+  {s:'Обычный'},
+  {s:'Slowed+Reverb',rate:.8,wet:.55,wlp:2600,warm:7500},
+  {s:'Nightcore',rate:1.25,wet:.06,wlp:9000},
+  {s:'8D',dir:0,pan:1,wet:.22,wlp:5000}
+];
+const FXD={dir:1,pan:0,wet:0,wlp:6000,warm:20000};
+if(!FX[ST.fx])ST.fx=0;
+const fxCfg=()=>({...FXD,...FX[ST.fx]});
+function makeIR(sec,decay){
+  const n=Math.floor(ac.sampleRate*sec),b=ac.createBuffer(2,n,ac.sampleRate);
+  for(let c=0;c<2;c++){const d=b.getChannelData(c);for(let i=0;i<n;i++)d[i]=(Math.random()*2-1)*Math.pow(1-i/n,decay)}
+  return b;
+}
 function initAudio(){
   if(ac)return;
   try{
@@ -457,11 +483,62 @@ function initAudio(){
     bassF=ac.createBiquadFilter();bassF.type='lowshelf';bassF.frequency.value=200;
     trebF=ac.createBiquadFilter();trebF.type='highshelf';trebF.frequency.value=3500;
     an=ac.createAnalyser();an.fftSize=256;an.smoothingTimeConstant=.8;
-    src.connect(bassF);bassF.connect(trebF);trebF.connect(an);an.connect(ac.destination);
-    applyEq();
-  }catch{ac=null;an=null}
+    const warm=ac.createBiquadFilter();warm.type='lowpass';warm.frequency.value=20000;warm.Q.value=.5;
+    const dir=ac.createGain(),pg=ac.createGain(),wet=ac.createGain(),mix=ac.createGain();
+    const conv=ac.createConvolver();conv.buffer=makeIR(3.4,2.4);
+    const wlp=ac.createBiquadFilter();wlp.type='lowpass';wlp.frequency.value=6000;
+    const lim=ac.createDynamicsCompressor();
+    lim.threshold.value=-4;lim.knee.value=6;lim.ratio.value=12;lim.attack.value=.003;lim.release.value=.2;
+    mix.gain.value=.9;dir.gain.value=1;pg.gain.value=0;wet.gain.value=0;
+    src.connect(bassF);bassF.connect(trebF);trebF.connect(warm);
+    warm.connect(dir);dir.connect(mix);                         /* прямой звук */
+    warm.connect(conv);conv.connect(wlp);wlp.connect(wet);wet.connect(mix); /* реверберация */
+    /* 8D: источник звука кружит вокруг головы (период 8 с) */
+    let canPan=false;
+    const pn=ac.createPanner();
+    if(pn.positionX){
+      pn.panningModel='HRTF';pn.distanceModel='inverse';pn.rolloffFactor=0;pn.refDistance=1;
+      pn.positionX.value=0;pn.positionY.value=0;pn.positionZ.value=0;
+      const ox=ac.createOscillator(),oz=ac.createOscillator(),gx=ac.createGain(),gz=ac.createGain();
+      ox.frequency.value=oz.frequency.value=.125;gx.gain.value=gz.gain.value=3;
+      oz.setPeriodicWave(ac.createPeriodicWave(new Float32Array([0,1]),new Float32Array([0,0]))); /* косинус */
+      ox.connect(gx);gx.connect(pn.positionX);oz.connect(gz);gz.connect(pn.positionZ);
+      ox.start();oz.start();
+      warm.connect(pn);pn.connect(pg);pg.connect(mix);canPan=true;
+    }else if(ac.createStereoPanner){
+      const sp=ac.createStereoPanner(),o=ac.createOscillator(),g=ac.createGain();
+      o.frequency.value=.125;g.gain.value=1;o.connect(g);g.connect(sp.pan);o.start();
+      warm.connect(sp);sp.connect(pg);pg.connect(mix);canPan=true;
+    }
+    mix.connect(lim);lim.connect(an);an.connect(ac.destination);
+    fx={dir,pg,wet,wlp,warm,canPan};
+    applyEq();applyFx(true);
+  }catch{ac=null;an=null;fx=null}
 }
 function applyEq(){if(bassF){bassF.gain.value=ST.bass;trebF.gain.value=ST.treb}}
+function applyRate(){
+  const c=fxCfg(),r=c.rate||ST.speed;
+  audio.preservesPitch=audio.mozPreservesPitch=audio.webkitPreservesPitch=!c.rate; /* slowed/nightcore меняют и тон */
+  audio.playbackRate=r;
+  const sp=$('sp');
+  if(sp){sp.disabled=!!c.rate;$('spv').textContent=c.rate?r+'× (режим)':ST.speed+'×'}
+}
+function applyFx(now){
+  applyRate();
+  if(!fx)return;
+  const c=fxCfg(),t=ac.currentTime,k=now?.001:.12;
+  fx.dir.gain.setTargetAtTime(c.pan&&!fx.canPan?1:c.dir,t,k);
+  fx.pg.gain.setTargetAtTime(fx.canPan?c.pan*1.25:0,t,k);
+  fx.wet.gain.setTargetAtTime(c.wet,t,k);
+  fx.wlp.frequency.setTargetAtTime(c.wlp,t,k);
+  fx.warm.frequency.setTargetAtTime(c.warm,t,k);
+}
+function syncFx(){
+  [...$('fxseg').children].forEach((b,j)=>b.setAttribute('aria-pressed',j===ST.fx));
+  const b=$('fxBtn');b.textContent=ST.fx?FX[ST.fx].s:'Звук: обычный';b.classList.toggle('on',ST.fx>0);
+}
+function setFx(i){ST.fx=i;save();applyFx(false);syncFx()}
+function cycleFx(){setFx((ST.fx+1)%FX.length)}
 
 /* настройки */
 function bind(id,vid,key,f,fn){
@@ -473,7 +550,7 @@ function bind(id,vid,key,f,fn){
 }
 const db=v=>(v>0?'+':'')+v+' дБ';
 bind('gl','glv','glow',v=>v?Math.round(v*100)+'%':'выкл',()=>{});
-bind('sp','spv','speed',v=>v+'×',()=>{audio.playbackRate=ST.speed});
+bind('sp','spv','speed',v=>v+'×',()=>{applyRate()});
 bind('bs','bsv','bass',db,applyEq);
 bind('tr','trv','treb',db,applyEq);
 function seg(id,opts,cur,set){
@@ -481,6 +558,9 @@ function seg(id,opts,cur,set){
   opts.forEach((o,i)=>{const b=document.createElement('button');b.textContent=o;b.onclick=()=>{set(i);mark()};box.append(b)});
   mark();
 }
+seg('fxseg',FX.map(f=>f.s),()=>ST.fx,i=>setFx(i));
+$('fxBtn').onclick=cycleFx;syncFx();applyFx(true);
+seg('bgseg',['Танцующий','Мягкий'],()=>ST.bgfx,i=>{ST.bgfx=i;save();bgApply()});
 seg('autoseg',['Играть дальше','Остановиться'],()=>ST.auto?0:1,i=>{ST.auto=i===0;save()});
 seg('vizseg',['Столбцы','Волна','Круг'],()=>ST.viz,i=>{ST.viz=i;save()});
 let sleepI=0,sleepEnd=0,sleepT;
@@ -506,6 +586,96 @@ const cv=$('viz'),cx=cv.getContext('2d'),data=new Uint8Array(128),tmp=new Uint8A
 function fit(){const r=cv.getBoundingClientRect(),d=window.devicePixelRatio||1;cv.width=Math.round(r.width*d);cv.height=Math.round(r.height*d)}
 addEventListener('resize',fit);fit();
 let bt=0;const pk=new Float32Array(48),coverEl=$('cover'),ambEl=$('amb');
+/* ===== Фон, который танцует под бит (WebGL) ===== */
+const FS=`
+#ifdef GL_FRAGMENT_PRECISION_HIGH
+precision highp float;
+#else
+precision mediump float;
+#endif
+uniform vec2 R;uniform float T,B,M,H,K,I;uniform vec3 C0,C1;
+float hash(vec2 p){p=fract(p*vec2(123.34,456.21));p+=dot(p,p+45.32);return fract(p.x*p.y);}
+float noise(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);
+  return mix(mix(hash(i),hash(i+vec2(1.,0.)),f.x),mix(hash(i+vec2(0.,1.)),hash(i+vec2(1.,1.)),f.x),f.y);}
+float fbm(vec2 p){float v=0.,a=.5;for(int i=0;i<4;i++){v+=a*noise(p);p=p*2.02+vec2(3.1,1.7);a*=.5;}return v;}
+void main(){
+  vec2 uv=(gl_FragCoord.xy-.5*R)/min(R.x,R.y);
+  float pulse=B*.7+K*.9;
+  vec2 p=uv*(1.5+B*.25);
+  vec2 q=vec2(fbm(p+vec2(0.,T*.35)),fbm(p+vec2(5.2,1.3)-T*.3));
+  vec2 r=vec2(fbm(p+3.*q+vec2(1.7,9.2)+T*.2),fbm(p+3.*q+vec2(8.3,2.8)-T*.25));
+  float f=fbm(p+(2.+K*1.6+B*.8)*r);
+  float g=0.;
+  for(int i=0;i<5;i++){
+    float fi=float(i);
+    vec2 c=vec2(sin(T*.55+fi*1.9),cos(T*.47+fi*2.7))*(.42+.3*B+.08*sin(T+fi));
+    vec2 d=uv-c;
+    g+=(.010+.018*K+.012*B)/(dot(d,d)+.012);
+  }
+  vec3 C2=mix(C1,C1.gbr,.6);
+  vec3 tint=mix(C1,C2,smoothstep(.2,.8,r.x));
+  float lum=f*f*1.7;
+  vec3 col=C0;
+  col+=tint*lum*(.30+.55*pulse+.30*M);
+  col+=tint*g*(.45+.9*pulse);
+  float ridge=pow(1.-abs(noise(p*5.+vec2(T*.6,-T*.4))*2.-1.),7.);
+  col+=C2*ridge*H*.9*lum;
+  col=col/(1.+.55*col);
+  col*=1.-.5*smoothstep(.35,1.35,length(uv));
+  gl_FragColor=vec4(mix(C0,col,I),1.);
+}`;
+const bgc=$('bg'),calm=matchMedia('(prefers-reduced-motion: reduce)').matches;
+let gl=null,glU={},glOK=false,bgOn=false,tt=0,lt=0,kick=0,bavg=0,lastK=0,mdS=0,trS=0,thSeen=-1;
+const hexRGB=h=>[1,3,5].map(i=>parseInt(h.slice(i,i+2),16)/255);
+let cc0=hexRGB(THEMES[ST.theme][1]),cc1=hexRGB(THEMES[ST.theme][2]),tg0=cc0,tg1=cc1;
+function bgInit(){
+  try{
+    gl=bgc.getContext('webgl',{alpha:false,antialias:false,depth:false,stencil:false,powerPreference:'low-power'});
+    if(!gl)return false;
+    const mk=(ty,src)=>{const sh=gl.createShader(ty);gl.shaderSource(sh,src);gl.compileShader(sh);if(!gl.getShaderParameter(sh,gl.COMPILE_STATUS))throw new Error(gl.getShaderInfoLog(sh));return sh};
+    const pr=gl.createProgram();
+    gl.attachShader(pr,mk(gl.VERTEX_SHADER,'attribute vec2 a;void main(){gl_Position=vec4(a,0.,1.);}'));
+    gl.attachShader(pr,mk(gl.FRAGMENT_SHADER,FS));
+    gl.linkProgram(pr);if(!gl.getProgramParameter(pr,gl.LINK_STATUS))throw new Error('link');
+    gl.useProgram(pr);
+    gl.bindBuffer(gl.ARRAY_BUFFER,gl.createBuffer());
+    gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,3,-1,-1,3]),gl.STATIC_DRAW);
+    const a=gl.getAttribLocation(pr,'a');gl.enableVertexAttribArray(a);gl.vertexAttribPointer(a,2,gl.FLOAT,false,0,0);
+    for(const n of ['R','T','B','M','H','K','I','C0','C1'])glU[n]=gl.getUniformLocation(pr,n);
+    bgc.addEventListener('webglcontextlost',e=>{e.preventDefault();glOK=false;bgApply()});
+    return true;
+  }catch(e){gl=null;return false}
+}
+function bgFit(){
+  const sc=Math.min(window.devicePixelRatio||1,1.5)*.5;
+  bgc.width=Math.max(2,Math.round(innerWidth*sc));bgc.height=Math.max(2,Math.round(innerHeight*sc));
+  if(gl)gl.viewport(0,0,bgc.width,bgc.height);
+}
+function bgApply(){
+  bgOn=glOK&&ST.bgfx===0;
+  document.body.classList.toggle('gl',bgOn);
+}
+glOK=bgInit();bgFit();addEventListener('resize',bgFit);bgApply();
+const av=(a,b)=>{let s=0;for(let i=a;i<b;i++)s+=data[i];return s/((b-a)*255)};
+function bgStep(t){
+  const dt=Math.min(.05,(t-lt)/1000||.016);lt=t;
+  const bs=av(0,4);
+  mdS+=(av(4,24)-mdS)*.3;trS+=(av(40,100)-trS)*.3;
+  bavg+=(bs-bavg)*Math.min(1,dt*1.5);
+  if(!audio.paused&&!calm&&bs>bavg*1.22+.04&&t-lastK>170){kick=1;lastK=t}
+  kick*=Math.exp(-dt*5);
+  if(thSeen!==ST.theme){thSeen=ST.theme;tg0=hexRGB(THEMES[ST.theme][1]);tg1=hexRGB(THEMES[ST.theme][2])}
+  const k=1-Math.exp(-dt*3);
+  for(let i=0;i<3;i++){cc0[i]+=(tg0[i]-cc0[i])*k;cc1[i]+=(tg1[i]-cc1[i])*k}
+  tt+=dt*(.16+.5*bt+.7*kick)*(calm?.3:1);
+  const I=Math.min(2,ST.glow);
+  gl.uniform2f(glU.R,bgc.width,bgc.height);
+  gl.uniform1f(glU.T,tt);gl.uniform1f(glU.B,bt*I);gl.uniform1f(glU.M,mdS*I);gl.uniform1f(glU.H,trS*I);gl.uniform1f(glU.K,kick*I);
+  gl.uniform1f(glU.I,Math.min(1,.55+.45*I));
+  gl.uniform3f(glU.C0,cc0[0],cc0[1],cc0[2]);gl.uniform3f(glU.C1,cc1[0],cc1[1],cc1[2]);
+  gl.drawArrays(gl.TRIANGLES,0,3);
+}
+
 function frame(t){
   requestAnimationFrame(frame);
   const W=cv.width,H=cv.height,d=W/300,N=48;
@@ -514,6 +684,7 @@ function frame(t){
   else for(let i=0;i<128;i++)data[i]*=.92;
   bt+=((data[0]+data[1]+data[2]+data[3])/1020-bt)*.25;
   const bv=(bt*ST.glow).toFixed(3);coverEl.style.setProperty('--beat',bv);ambEl.style.setProperty('--beat',bv);
+  if(bgOn)bgStep(t);
   cx.shadowBlur=0;cx.globalCompositeOperation='destination-out';cx.fillStyle='rgba(0,0,0,.3)';cx.fillRect(0,0,W,H);cx.globalCompositeOperation='source-over';
   cx.fillStyle=cx.strokeStyle=vc;cx.lineCap=cx.lineJoin='round';cx.shadowColor=vc;cx.shadowBlur=16*d*ST.glow;
   const v=i=>data[Math.min(127,Math.floor(i*1.3))]/255,sy=i=>v(Math.abs(i-N/2)*1.6);
