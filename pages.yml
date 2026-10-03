@@ -1,0 +1,53 @@
+# Автодеплой сайта + автоматический список треков (music/tracks.json, новые сверху)
+name: Deploy site
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Build music/tracks.json (newest first)
+        run: |
+          python3 - <<'PY'
+          import json, os, re, subprocess
+          d = 'music'
+          os.makedirs(d, exist_ok=True)
+          files = [f for f in os.listdir(d) if re.search(r'\.(mp3|wav)$', f, re.I)]
+          def added(f):
+              out = subprocess.run(['git', 'log', '--diff-filter=A', '--format=%ct', '--', os.path.join(d, f)],
+                                   capture_output=True, text=True).stdout.split()
+              return int(out[-1]) if out else 0
+          files.sort(key=lambda f: (-added(f), f.lower()))
+          with open(os.path.join(d, 'tracks.json'), 'w', encoding='utf-8') as fh:
+              json.dump(files, fh, ensure_ascii=False, indent=1)
+          print(len(files), 'tracks')
+          PY
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: .
+
+      - id: deployment
+        uses: actions/deploy-pages@v4
