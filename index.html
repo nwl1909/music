@@ -37,7 +37,7 @@ button.on{color:var(--glow)}
 .vol input{max-width:200px}
 .side{background:var(--panel);border:1px solid var(--line);border-radius:28px;padding:20px;backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);display:flex;flex-direction:column;gap:14px;max-height:calc(100vh - 48px);min-height:160px}
 .list{overflow-y:auto;display:flex;flex-direction:column;gap:4px;flex:1;margin:0 -8px;padding:0 8px}
-.item{display:grid;grid-template-columns:44px 1fr auto auto;gap:12px;align-items:center;padding:8px;border-radius:14px;cursor:pointer}
+.item{display:grid;grid-template-columns:44px 1fr auto auto auto;gap:12px;align-items:center;padding:8px;border-radius:14px;cursor:pointer}
 .item:hover{background:var(--panel)}
 .item.cur{background:color-mix(in srgb,var(--glow) 24%,transparent)}
 .item .t{width:44px;height:44px;border-radius:10px;background-size:cover;background-position:center;display:grid;place-items:center;font:700 16px 'Bricolage Grotesque';color:#fff}
@@ -134,6 +134,11 @@ input[type=range]:hover::-webkit-slider-thumb{transform:scale(1.3)}
 .ov:not([hidden]) .sheet{animation:sheetIn .45s cubic-bezier(.2,.8,.2,1)}
 .themes button:hover{transform:scale(1.2) rotate(8deg)}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
+.dl{width:36px;height:36px;display:grid;place-items:center;border-radius:50%;color:var(--muted);transition:background .2s,color .2s,transform .15s}
+.dl:hover{background:var(--panel);color:var(--text);transform:translateY(2px)}
+.dl svg{width:18px;height:18px;fill:currentColor}
+.dl:focus-visible{outline:2px solid var(--text);outline-offset:2px}
+@media(max-width:820px){.item{gap:6px}}
 </style>
 </head>
 <body>
@@ -165,6 +170,7 @@ input[type=range]:hover::-webkit-slider-thumb{transform:scale(1.3)}
   <div class="sh"><h2>Настройки</h2><button id="cls" aria-label="Закрыть"><svg viewBox="0 0 24 24"><path d="M19 6.400 17.600 5 12 10.600 6.400 5 5 6.400 10.600 12 5 17.600 6.400 19 12 13.400 17.600 19 19 17.600 13.400 12z"/></svg></button></div>
   <div class="row"><label>Цвет оформления</label><div class="themes" id="themes"></div></div>
   <div class="row"><label>Визуализация</label><div class="seg" id="vizseg"></div></div>
+  <div class="row"><label>После окончания трека</label><div class="seg" id="autoseg"></div></div>
   <div class="row"><label>Скорость <b id="spv"></b></label><input type="range" id="sp" min="50" max="200" step="5"></div>
   <div class="row"><label>Бас <b id="bsv"></b></label><input type="range" id="bs" min="-12" max="12" step="1"></div>
   <div class="row"><label>Высокие <b id="trv"></b></label><input type="range" id="tr" min="-12" max="12" step="1"></div>
@@ -182,9 +188,10 @@ const ICON={play:'<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>',paus
  x:'<svg viewBox="0 0 24 24"><path d="M19 6.400L17.600 5 12 10.600 6.400 5 5 6.400 10.600 12 5 17.600 6.400 19 12 13.400 17.600 19 19 17.600 13.400 12z"/></svg>'};
 const get=(k,d)=>{try{return JSON.parse(localStorage.getItem(k))??d}catch{return d}};
 const put=(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v))}catch{}};
-const ST={theme:0,viz:0,speed:1,bass:0,treb:0,vol:.8,shuf:false,rep:0,...get('pl_st',{})};
+const ST={theme:0,viz:0,speed:1,bass:0,treb:0,vol:.8,shuf:false,rep:0,auto:true,...get('pl_st',{})};
 const save=()=>put('pl_st',ST);
 const favs=new Set(get('pl_fav',[]));
+const DL='<svg viewBox="0 0 24 24"><path d="M5 20h14v-2H5v2zM19 9h-4V3H9v6H5l7 7 7-7z"/></svg>';
 const HEART='<svg viewBox="0 0 24 24"><path d="M12 21s-8-4.900-10-10C.7 7.600 3 4 6.500 4 9 4 11 5.500 12 7.500 13 5.500 15 4 17.500 4 21 4 23.300 7.600 22 11c-2 5.100-10 10-10 10z"/></svg>';
 let favOnly=false,lastSave=0,vc='#8b7cff';
 let tracks=[],idx=-1,shuffle=false,repeat=0,lastVol=ST.vol||.8;
@@ -240,7 +247,7 @@ async function loadLibrary(){
     const seg=location.pathname.split('/')[1]||'';
     repo=seg&&!seg.includes('.')?seg:h;
   }
-  let names=[],folder=CONFIG.folder,why='';
+  let names=[],folder=CONFIG.folder,why='',shaMap=null;
   const isAudio=f=>f.type==='file'&&/\.(mp3|wav)$/i.test(f.name);
   if(!owner)why='Адрес сайта не github.io: укажите owner и repo в CONFIG или создайте music/tracks.json';
   else{
@@ -252,7 +259,7 @@ async function loadLibrary(){
         const dir=Array.isArray(root)&&root.find(f=>f.type==='dir'&&f.name.toLowerCase()===folder.toLowerCase());
         if(dir){folder=dir.name;r=await fetch(`${api}/${folder}`)}
       }
-      if(r.ok){names=(await r.json()).filter(isAudio).map(f=>f.name);if(!names.length)why='В папке '+folder+' нет файлов mp3 или wav'}
+      if(r.ok){const it=(await r.json()).filter(isAudio);names=it.map(f=>f.name);shaMap=Object.fromEntries(it.map(f=>[f.name,f.sha]));if(!names.length)why='В папке '+folder+' нет файлов mp3 или wav'}
       else why=r.status===404?`Папка ${folder} не найдена в репозитории ${owner}/${repo} (она должна лежать рядом с index.html)`
         :r.status===403?'Лимит запросов GitHub API: подождите час или создайте music/tracks.json':'Ошибка GitHub API: '+r.status;
     }catch{why='Нет связи с GitHub API'}
@@ -260,7 +267,22 @@ async function loadLibrary(){
   if(!names.length){
     try{const j=await (await fetch(`${CONFIG.folder}/tracks.json`)).json();if(Array.isArray(j)&&j.length){names=j;folder=CONFIG.folder}}catch{}
   }
-  names.sort((a,b)=>a.localeCompare(b,'ru',{numeric:true}));
+  if(shaMap){
+    /* дата добавления = дата последнего коммита файла; кэшируется по sha, чтобы не тратить лимит API */
+    const dc=get('pl_dates',{}),need=names.filter(n=>!dc[shaMap[n]]);
+    await Promise.race([
+      Promise.all(need.map(async n=>{
+        try{
+          const r=await fetch(`https://api.github.com/repos/${owner}/${repo}/commits?path=${encodeURIComponent(folder+'/'+n)}&per_page=1`);
+          if(!r.ok)return;
+          const j=await r.json(),d=j[0]&&j[0].commit.committer.date;
+          if(d){dc[shaMap[n]]=d;put('pl_dates',dc)}
+        }catch{}
+      })),
+      new Promise(r=>setTimeout(r,6000))
+    ]);
+    names.sort((a,b)=>(dc[shaMap[b]]||'').localeCompare(dc[shaMap[a]]||'')||a.localeCompare(b,'ru',{numeric:true}));
+  }
   for(const n of names){
     const url=`${folder}/${encodeURIComponent(n)}`;
     await pushTrack(url,url,n);
@@ -294,7 +316,8 @@ function render(){
     const du=document.createElement('span');du.className='d';du.textContent=t.duration?fmt(t.duration):'';
     const f=document.createElement('button');f.className='fv'+(favs.has(t.key)?' on':'');f.innerHTML=HEART;f.setAttribute('aria-label','В избранное');
     f.onclick=e=>{e.stopPropagation();favs.has(t.key)?favs.delete(t.key):favs.add(t.key);put('pl_fav',[...favs]);favOnly?render():f.classList.toggle('on',favs.has(t.key))};
-    d.append(th,info,du,f);
+    const dl=document.createElement('a');dl.className='dl';dl.href=t.url;dl.download=t.key;dl.title='Скачать';dl.setAttribute('aria-label','Скачать '+t.title);dl.innerHTML=DL;dl.onclick=e=>e.stopPropagation();
+    d.append(th,info,du,dl,f);
     d.onclick=()=>load(i,true);
     d.onkeydown=e=>{if(e.key==='Enter')load(i,true)};
     list.append(d);
@@ -317,6 +340,7 @@ function load(i,play){
 function next(auto){
   if(!tracks.length)return;
   if(auto&&repeat===2){audio.currentTime=0;audio.play();return}
+  if(auto&&!ST.auto){audio.currentTime=0;return}
   let n;
   if(shuffle&&tracks.length>1){do n=Math.floor(Math.random()*tracks.length);while(n===idx)}
   else n=idx+1;
@@ -425,6 +449,7 @@ function seg(id,opts,cur,set){
   opts.forEach((o,i)=>{const b=document.createElement('button');b.textContent=o;b.onclick=()=>{set(i);mark()};box.append(b)});
   mark();
 }
+seg('autoseg',['Играть дальше','Остановиться'],()=>ST.auto?0:1,i=>{ST.auto=i===0;save()});
 seg('vizseg',['Столбцы','Волна','Круг'],()=>ST.viz,i=>{ST.viz=i;save()});
 let sleepI=0,sleepEnd=0,sleepT;
 seg('sleepseg',['Выкл','15 мин','30 мин','60 мин'],()=>sleepI,i=>{sleepI=i;setSleep([0,15,30,60][i])});
