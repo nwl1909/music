@@ -159,6 +159,7 @@ function parseName(name){
 function readTags(src,name){
   return new Promise(res=>{
     const fb=parseName(name);
+    setTimeout(()=>res(fb),5000);
     if(!window.jsmediatags)return res(fb);
     jsmediatags.read(src,{
       onSuccess:({tags})=>res({title:tags.title||fb.title,artist:tags.artist||fb.artist}),
@@ -171,11 +172,15 @@ function probeDuration(url){
 }
 
 async function pushTrack(src,url,name){
-  const t={url,key:name,...await readTags(src,name),duration:0};
+  const t={url,key:name,...parseName(name),duration:0};
   tracks.push(t);
-  probeDuration(url).then(d=>{t.duration=d;render()});
   render();
   if(idx<0)load(0,false);
+  probeDuration(url).then(d=>{t.duration=d;render()});
+  readTags(src,name).then(m=>{
+    Object.assign(t,m);render();
+    if(tracks[idx]===t){$('title').textContent=t.title;$('artist').textContent=t.artist;document.title=`${t.title} — ${t.artist}`}
+  });
 }
 
 /* ===== Музыка из папки репозитория ===== */
@@ -192,21 +197,32 @@ async function loadLibrary(){
     const seg=location.pathname.split('/')[1]||'';
     repo=seg&&!seg.includes('.')?seg:h;
   }
-  let names=[];
-  try{
-    if(!owner)throw 0;
-    const r=await fetch(`https://api.github.com/repos/${owner}/${repo}/contents/${CONFIG.folder}`);
-    if(!r.ok)throw 0;
-    names=(await r.json()).filter(f=>f.type==='file'&&/\.(mp3|wav)$/i.test(f.name)).map(f=>f.name);
-  }catch{
-    try{names=await (await fetch(`${CONFIG.folder}/tracks.json`)).json()}catch{}
+  let names=[],folder=CONFIG.folder,why='';
+  const isAudio=f=>f.type==='file'&&/\.(mp3|wav)$/i.test(f.name);
+  if(!owner)why='Адрес сайта не github.io: укажите owner и repo в CONFIG или создайте music/tracks.json';
+  else{
+    try{
+      const api=`https://api.github.com/repos/${owner}/${repo}/contents`;
+      let r=await fetch(`${api}/${folder}`);
+      if(r.status===404){
+        const root=r.ok?[]:await (await fetch(api)).json().catch(()=>[]);
+        const dir=Array.isArray(root)&&root.find(f=>f.type==='dir'&&f.name.toLowerCase()===folder.toLowerCase());
+        if(dir){folder=dir.name;r=await fetch(`${api}/${folder}`)}
+      }
+      if(r.ok){names=(await r.json()).filter(isAudio).map(f=>f.name);if(!names.length)why='В папке '+folder+' нет файлов mp3 или wav'}
+      else why=r.status===404?`Папка ${folder} не найдена в репозитории ${owner}/${repo} (она должна лежать рядом с index.html)`
+        :r.status===403?'Лимит запросов GitHub API: подождите час или создайте music/tracks.json':'Ошибка GitHub API: '+r.status;
+    }catch{why='Нет связи с GitHub API'}
+  }
+  if(!names.length){
+    try{const j=await (await fetch(`${CONFIG.folder}/tracks.json`)).json();if(Array.isArray(j)&&j.length){names=j;folder=CONFIG.folder}}catch{}
   }
   names.sort((a,b)=>a.localeCompare(b,'ru',{numeric:true}));
   for(const n of names){
-    const url=`${CONFIG.folder}/${encodeURIComponent(n)}`;
+    const url=`${folder}/${encodeURIComponent(n)}`;
     await pushTrack(url,url,n);
   }
-  if(!tracks.length){$('title').textContent='Треков пока нет';$('artist').textContent='Добавьте файлы в папку music'}
+  if(!tracks.length){$('title').textContent='Треков пока нет';$('artist').textContent=why||'Добавьте файлы в папку music'}
   else{
     const L=get('pl_last',null),i=L?tracks.findIndex(t=>t.key===L.key):-1;
     if(i>=0){
