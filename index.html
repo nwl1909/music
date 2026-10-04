@@ -37,7 +37,7 @@ button.on{color:var(--glow)}
 .vol{display:flex;align-items:center;gap:8px;max-width:420px}
 .vol input{max-width:200px}
 .side{background:var(--panel);border:1px solid var(--line);border-radius:28px;padding:20px;backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);display:flex;flex-direction:column;gap:14px;max-height:calc(100vh - 48px);min-height:160px}
-.list{overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;display:flex;flex-direction:column;gap:4px;flex:1;margin:0 -8px;padding:0 8px}
+.list{overflow-y:auto;overflow-x:hidden;display:flex;flex-direction:column;gap:4px;flex:1;margin:0 -8px;padding:0 8px}
 .item{display:grid;grid-template-columns:44px minmax(0,1fr) auto auto auto;min-width:0;gap:12px;align-items:center;padding:8px;border-radius:14px;cursor:pointer}
 .item:hover{background:var(--panel)}
 .item.cur{background:color-mix(in srgb,var(--glow) 24%,transparent)}
@@ -101,7 +101,19 @@ button.on{color:var(--glow)}
  .controls,.vol{max-width:none}
  .vol input{max-width:280px}
  .side{height:100%;max-height:none;min-height:0}
+ .list{overscroll-behavior:contain}
 }
+/* телефоны и узкие экраны: прокручивается ТОЛЬКО страница, список не ловит палец */
+@media(max-width:820px),(max-height:559px){
+ .side{max-height:none;height:auto;min-height:0}
+ .list{overflow:visible;flex:none}
+}
+@media(max-width:820px),(pointer:coarse){
+ .side{backdrop-filter:none;-webkit-backdrop-filter:none;background:color-mix(in srgb,var(--bg) 82%,#fff)}
+ .ov{backdrop-filter:none;-webkit-backdrop-filter:none;background:rgba(0,0,0,.7)}
+ .ambient{filter:none}
+}
+input[type=range]{touch-action:pan-y}
 @property --glow{syntax:'<color>';inherits:true;initial-value:#8b7cff}
 @property --bg{syntax:'<color>';inherits:true;initial-value:#14101f}
 :root{transition:--glow .9s ease,--bg .9s ease}
@@ -199,7 +211,7 @@ body.opt .play,body.opt input[type=range]::-webkit-slider-thumb{box-shadow:none}
   <div class="row"><label>Высокие <b id="trv"></b></label><input type="range" id="tr" min="-12" max="12" step="1"></div>
   <div class="row"><label>Таймер сна</label><div class="seg" id="sleepseg"></div></div>
 </div></div>
-<audio id="audio" preload="metadata"></audio>
+<audio id="audio" preload="auto"></audio>
 <script>
 const $=id=>document.getElementById(id);
 const audio=$('audio'),list=$('list');
@@ -217,6 +229,7 @@ const favs=new Set(get('pl_fav',[]));
 const DL='<svg viewBox="0 0 24 24"><path d="M5 20h14v-2H5v2zM19 9h-4V3H9v6H5l7 7 7-7z"/></svg>';
 const HEART='<svg viewBox="0 0 24 24"><path d="M12 21s-8-4.900-10-10C.7 7.600 3 4 6.500 4 9 4 11 5.500 12 7.500 13 5.500 15 4 17.500 4 21 4 23.300 7.600 22 11c-2 5.100-10 10-10 10z"/></svg>';
 let favOnly=false,lastSave=0,vc='#8b7cff',optOn=false,hot=true,lastDraw=0;
+const coarse=matchMedia('(pointer:coarse)').matches;
 let tracks=[],idx=-1,shuffle=false,repeat=0,lastVol=ST.vol||.8;
 
 const fmt=s=>isFinite(s)?Math.floor(s/60)+':'+String(Math.floor(s%60)).padStart(2,'0'):'0:00';
@@ -244,26 +257,43 @@ function probeDuration(url){
   return new Promise(res=>{const a=new Audio();a.preload='metadata';a.onloadedmetadata=()=>res(a.duration);a.onerror=()=>res(0);a.src=url});
 }
 
-/* в режиме оптимизации длительность и теги читаются только у трека, который реально включили */
-function lazyMeta(t){
-  if(t._m)return;t._m=1;
-  probeDuration(t.url).then(d=>{t.duration=d;renderSoon()});
-  readTags(t.url,t.key).then(m=>{
-    Object.assign(t,m);renderSoon();
-    if(tracks[idx]===t){$('title').textContent=t.title;$('artist').textContent=t.artist;document.title=`${t.title} — ${t.artist}`}
-  });
+/* Теги/длительность читаем в очереди по 2 штуки и только после того, как текущий трек начал буферизоваться,
+   чтобы не отбирать у него канал (раньше все треки запрашивались одновременно). */
+const metaQ=[];let metaBusy=0,metaReady=false;
+function updateMeta(t){
+  $('title').textContent=t.title;$('artist').textContent=t.artist;document.title=`${t.title} — ${t.artist}`;
+  if('mediaSession' in navigator&&window.MediaMetadata)navigator.mediaSession.metadata=new MediaMetadata({title:t.title,artist:t.artist});
 }
+function queueMeta(t,front){
+  if(t._m)return;t._m=1;
+  front?metaQ.unshift(t):metaQ.push(t);pumpMeta();
+}
+function pumpMeta(){
+  if(!metaReady)return;
+  while(metaBusy<2&&metaQ.length){
+    const t=metaQ.shift();metaBusy++;
+    Promise.all([tracks[idx]===t?0:probeDuration(t.url),readTags(t.url,t.key)]).then(([d,m])=>{
+      if(d)t.duration=d;Object.assign(t,m);renderSoon();
+      if(tracks[idx]===t)updateMeta(t);
+    }).finally(()=>{metaBusy--;pumpMeta()});
+  }
+}
+const metaGo=()=>{metaReady=true;pumpMeta()};
+audio.addEventListener('canplay',metaGo,{once:true});setTimeout(metaGo,2500);
+/* следующий трек подгружаем заранее, чтобы переход не ждал сеть */
+const warmA=new Audio();warmA.preload='auto';warmA.muted=true;let warmUrl='';
+function prefetchNext(){
+  if(optOn||shuffle||tracks.length<2||(navigator.connection&&navigator.connection.saveData))return;
+  let n=idx+1;if(n>=tracks.length){if(!repeat)return;n=0}
+  const u=tracks[n].url;if(u===warmUrl)return;warmUrl=u;warmA.src=u;
+}
+audio.addEventListener('canplaythrough',prefetchNext);
 async function pushTrack(src,url,name){
   const t={url,key:name,...parseName(name),duration:0};
   tracks.push(t);
   if(!optOn||tracks.length===1)render();
   if(idx<0)load(0,false);
-  if(optOn)return;
-  probeDuration(url).then(d=>{t.duration=d;renderSoon()});
-  readTags(src,name).then(m=>{
-    Object.assign(t,m);renderSoon();
-    if(tracks[idx]===t){$('title').textContent=t.title;$('artist').textContent=t.artist;document.title=`${t.title} — ${t.artist}`}
-  });
+  if(!optOn)queueMeta(t);
 }
 
 /* ===== Музыка из папки репозитория ===== */
@@ -272,7 +302,7 @@ const CONFIG={
   owner:'',         // необязательно: логин GitHub (по умолчанию определяется из адреса сайта)
   repo:''           // необязательно: имя репозитория
 };
-async function loadLibrary(){
+async function loadLibrary(fresh){
   const h=location.hostname;
   let {owner,repo}=CONFIG;
   if(!owner&&h.endsWith('.github.io')){
@@ -280,15 +310,21 @@ async function loadLibrary(){
     const seg=location.pathname.split('/')[1]||'';
     repo=seg&&!seg.includes('.')?seg:h;
   }
-  let names=[],folder=CONFIG.folder,why='',shaMap=null,soft=false,rem=0;
+  let names=[],folder=CONFIG.folder,why='',shaMap=null,soft=false,rem=0,staleJson=false;
   const isAudio=f=>f.type==='file'&&/\.(mp3|wav)$/i.test(f.name);
   /* основной источник: music/tracks.json (его собирает workflow при каждой публикации, новые сверху) */
-  try{
+  if(!fresh)try{
     const r=await fetch(`${CONFIG.folder}/tracks.json`,{cache:'no-cache'});
     if(r.ok){const j=await r.json();if(Array.isArray(j)&&j.length)names=j.filter(x=>typeof x==='string')}
   }catch{}
+  /* после переименования файлов tracks.json может устареть: проверяем первый и последний файл списка */
+  if(names.length){
+    const ex=async n=>{try{return (await fetch(`${CONFIG.folder}/${encodeURIComponent(n)}`,{method:'HEAD',cache:'no-cache'})).ok}catch{return true}};
+    const chk=await Promise.all([...new Set([names[0],names[names.length-1]])].map(ex));
+    if(chk.includes(false)){names=[];staleJson=true}
+  }
   if(names.length){/* список получен без обращения к GitHub API */}
-  else if(!owner)why='Адрес сайта не github.io: укажите owner и repo в CONFIG или создайте music/tracks.json';
+  else if(!owner)why=staleJson?'music/tracks.json устарел: файлы переименованы. Включите Settings → Pages → GitHub Actions или обновите список вручную':'Адрес сайта не github.io: укажите owner и repo в CONFIG или создайте music/tracks.json';
   else{
     try{
       const api=`https://api.github.com/repos/${owner}/${repo}/contents`;
@@ -303,11 +339,11 @@ async function loadLibrary(){
         const it=(await r.json()).filter(isAudio);names=it.map(f=>f.name);
         shaMap=Object.fromEntries(it.map(f=>[f.name,f.sha]));
         if(names.length)put('pl_list',{folder,names,sha:shaMap});else why='В папке '+folder+' нет файлов mp3 или wav';
-      }else if(r.status===403||r.status===429){soft=true;why='Лимит запросов GitHub API: подождите час или создайте music/tracks.json'}
+      }else if(r.status===403||r.status===429){soft=true;why=staleJson||fresh?'Файл не найден, а список обновить не удалось (лимит GitHub API). Обновите music/tracks.json или включите Pages → GitHub Actions':'Лимит запросов GitHub API: подождите час или создайте music/tracks.json'}
       else why=r.status===404?`Папка ${folder} не найдена в репозитории ${owner}/${repo} (она должна лежать рядом с index.html)`:'Ошибка GitHub API: '+r.status;
     }catch{soft=true;why='Нет связи с GitHub API'}
   }
-  if(!names.length&&soft){
+  if(!names.length&&soft&&!fresh&&!staleJson){
     const c=get('pl_list',null);
     if(c&&c.names&&c.names.length){names=c.names;folder=c.folder;shaMap=c.sha;why=''}
   }
@@ -321,7 +357,7 @@ async function loadLibrary(){
       }catch{}
     }
   }
-  if(!names.length){
+  if(!names.length&&!fresh&&!staleJson){
     try{const j=await (await fetch(`${CONFIG.folder}/tracks.json`)).json();if(Array.isArray(j)&&j.length){names=j;folder=CONFIG.folder}}catch{}
   }
   if(shaMap){
@@ -407,14 +443,16 @@ function render(){
 function load(i,play){
   idx=i;const t=tracks[i];
   const mt=document.querySelector('.meta');mt.classList.remove('swap');void mt.offsetWidth;mt.classList.add('swap');
-  audio.src=t.url;applyRate();if(optOn)lazyMeta(t);
+  audio.src=t.url;applyRate();
   $('title').textContent=t.title;$('artist').textContent=t.artist;
   document.title=`${t.title} — ${t.artist}`;
   if('mediaSession' in navigator){
     navigator.mediaSession.metadata=new MediaMetadata({title:t.title,artist:t.artist});
   }
   markCur();
-  if(play)audio.play().catch(()=>{});
+  wantPlay=!!play;
+  if(play){wake();audio.play().catch(()=>{})}
+  queueMeta(t,true);
 }
 function next(auto){
   if(!tracks.length)return;
@@ -431,7 +469,20 @@ function prev(){
   if(audio.currentTime>3){audio.currentTime=0;return}
   load((idx-1+tracks.length)%tracks.length,!audio.paused);
 }
-function toggle(){if(!tracks.length)return;audio.paused?audio.play():audio.pause()}
+let wantPlay=false,healed=false;
+async function healLibrary(){ /* файл не найден (переименован/удалён): пересобираем список из реальной папки */
+  const wasPlaying=wantPlay||!audio.paused;
+  $('artist').textContent='Файл не найден — обновляю список…';
+  tracks.length=0;idx=-1;metaQ.length=0;warmUrl='';list.innerHTML='';
+  await loadLibrary(true);
+  if(wasPlaying&&tracks.length&&idx>=0)load(idx,true);
+}
+audio.addEventListener('error',()=>{
+  if(healed||!audio.getAttribute('src')||!tracks[idx])return;
+  healed=true;healLibrary();
+});
+function wake(){initAudio();if(ac&&ac.state!=='running')ac.resume()}
+function toggle(){if(!tracks.length)return;if(audio.paused){wake();audio.play().catch(()=>{})}else audio.pause()}
 
 $('play').innerHTML=ICON.play;$('rep').innerHTML=ICON.rep;$('mute').innerHTML=ICON.vol;
 $('play').onclick=toggle;$('next').onclick=()=>next(false);$('prev').onclick=prev;
@@ -477,7 +528,7 @@ document.addEventListener('keydown',e=>{
   else if(k==='e')cycleFx();
 });
 if('mediaSession' in navigator){
-  navigator.mediaSession.setActionHandler('play',()=>audio.play());
+  navigator.mediaSession.setActionHandler('play',()=>{wake();audio.play().catch(()=>{})});
   navigator.mediaSession.setActionHandler('pause',()=>audio.pause());
   navigator.mediaSession.setActionHandler('nexttrack',()=>next(false));
   navigator.mediaSession.setActionHandler('previoustrack',prev);
@@ -509,8 +560,9 @@ const FXD={dir:1,pan:0,wet:0,wlp:6000,warm:20000};
 if(!FX[ST.fx])ST.fx=0;
 const fxCfg=()=>({...FXD,...FX[ST.fx]});
 function makeIR(sec,decay){
-  const n=Math.floor(ac.sampleRate*sec),b=ac.createBuffer(2,n,ac.sampleRate);
-  for(let c=0;c<2;c++){const d=b.getChannelData(c);for(let i=0;i<n;i++)d[i]=(Math.random()*2-1)*Math.pow(1-i/n,decay)}
+  const n=Math.floor(ac.sampleRate*sec),b=ac.createBuffer(2,n,ac.sampleRate),env=new Float32Array(n);
+  for(let i=0;i<n;i++)env[i]=Math.pow(1-i/n,decay);
+  for(let c=0;c<2;c++){const d=b.getChannelData(c);for(let i=0;i<n;i++)d[i]=(Math.random()*2-1)*env[i]}
   return b;
 }
 function initAudio(){
@@ -522,36 +574,43 @@ function initAudio(){
     trebF=ac.createBiquadFilter();trebF.type='highshelf';trebF.frequency.value=3500;
     an=ac.createAnalyser();an.fftSize=256;an.smoothingTimeConstant=.8;
     const warm=ac.createBiquadFilter();warm.type='lowpass';warm.frequency.value=20000;warm.Q.value=.5;
-    const dir=ac.createGain(),pg=ac.createGain(),wet=ac.createGain(),mix=ac.createGain();
-    const conv=ac.createConvolver();conv.buffer=makeIR(3.4,2.4);
-    const wlp=ac.createBiquadFilter();wlp.type='lowpass';wlp.frequency.value=6000;
+    const dir=ac.createGain(),mix=ac.createGain();
     const lim=ac.createDynamicsCompressor();
     lim.threshold.value=-4;lim.knee.value=6;lim.ratio.value=12;lim.attack.value=.003;lim.release.value=.2;
-    mix.gain.value=.9;dir.gain.value=1;pg.gain.value=0;wet.gain.value=0;
-    src.connect(bassF);bassF.connect(trebF);trebF.connect(warm);
-    warm.connect(dir);dir.connect(mix);                         /* прямой звук */
-    warm.connect(conv);conv.connect(wlp);wlp.connect(wet);wet.connect(mix); /* реверберация */
-    /* 8D: источник звука кружит вокруг головы (период 8 с) */
-    let canPan=false;
-    const pn=ac.createPanner();
-    if(pn.positionX){
-      pn.panningModel='HRTF';pn.distanceModel='inverse';pn.rolloffFactor=0;pn.refDistance=1;
-      pn.positionX.value=0;pn.positionY.value=0;pn.positionZ.value=0;
-      const ox=ac.createOscillator(),oz=ac.createOscillator(),gx=ac.createGain(),gz=ac.createGain();
-      ox.frequency.value=oz.frequency.value=.125;gx.gain.value=gz.gain.value=3;
-      oz.setPeriodicWave(ac.createPeriodicWave(new Float32Array([0,1]),new Float32Array([0,0]))); /* косинус */
-      ox.connect(gx);gx.connect(pn.positionX);oz.connect(gz);gz.connect(pn.positionZ);
-      ox.start();oz.start();
-      warm.connect(pn);pn.connect(pg);pg.connect(mix);canPan=true;
-    }else if(ac.createStereoPanner){
-      const sp=ac.createStereoPanner(),o=ac.createOscillator(),g=ac.createGain();
-      o.frequency.value=.125;g.gain.value=1;o.connect(g);g.connect(sp.pan);o.start();
-      warm.connect(sp);sp.connect(pg);pg.connect(mix);canPan=true;
-    }
+    mix.gain.value=.9;
+    /* обычный режим: только эквалайзер -> лимитер, без тяжёлой обработки */
+    src.connect(bassF);bassF.connect(trebF);trebF.connect(warm);warm.connect(dir);dir.connect(mix);
     mix.connect(lim);lim.connect(an);an.connect(ac.destination);
-    fx={dir,pg,wet,wlp,warm,canPan};
+    fx={dir,mix,warm};
     applyEq();applyFx(true);
   }catch{ac=null;an=null;fx=null}
+}
+/* реверберация и 8D создаются и подключаются только когда выбран нужный режим (экономит CPU и батарею) */
+function ensureRev(){
+  if(fx.conv)return;
+  const conv=ac.createConvolver(),wlp=ac.createBiquadFilter(),wet=ac.createGain();
+  conv.buffer=makeIR(2.8,2.4);wlp.type='lowpass';wlp.frequency.value=6000;wet.gain.value=0;
+  conv.connect(wlp);wlp.connect(wet);wet.connect(fx.mix);
+  Object.assign(fx,{conv,wlp,wet,revOn:false});
+}
+function ensurePan(){
+  if(fx.pn||fx.noPan)return;
+  const pg=ac.createGain();pg.gain.value=0;
+  let pn=ac.createPanner();
+  if(pn.positionX){ /* 8D: источник кружит вокруг головы, период 8 с */
+    pn.panningModel='HRTF';pn.distanceModel='inverse';pn.rolloffFactor=0;pn.refDistance=1;
+    pn.positionX.value=0;pn.positionY.value=0;pn.positionZ.value=0;
+    const ox=ac.createOscillator(),oz=ac.createOscillator(),gx=ac.createGain(),gz=ac.createGain();
+    ox.frequency.value=oz.frequency.value=.125;gx.gain.value=gz.gain.value=3;
+    oz.setPeriodicWave(ac.createPeriodicWave(new Float32Array([0,1]),new Float32Array([0,0])));
+    ox.connect(gx);gx.connect(pn.positionX);oz.connect(gz);gz.connect(pn.positionZ);
+    ox.start();oz.start();
+  }else if(ac.createStereoPanner){
+    pn=ac.createStereoPanner();const o=ac.createOscillator(),g=ac.createGain();
+    o.frequency.value=.125;g.gain.value=1;o.connect(g);g.connect(pn.pan);o.start();
+  }else{fx.noPan=true;return}
+  pn.connect(pg);pg.connect(fx.mix);
+  Object.assign(fx,{pn,pg,panOn:false});
 }
 function applyEq(){if(bassF){bassF.gain.value=ST.bass;trebF.gain.value=ST.treb}}
 function applyRate(){
@@ -564,12 +623,18 @@ function applyRate(){
 function applyFx(now){
   applyRate();
   if(!fx)return;
-  const c=fxCfg(),t=ac.currentTime,k=now?.001:.12;
-  fx.dir.gain.setTargetAtTime(c.pan&&!fx.canPan?1:c.dir,t,k);
-  fx.pg.gain.setTargetAtTime(fx.canPan?c.pan*1.25:0,t,k);
-  fx.wet.gain.setTargetAtTime(c.wet,t,k);
-  fx.wlp.frequency.setTargetAtTime(c.wlp,t,k);
+  const c=fxCfg(),t=ac.currentTime,k=now?.001:.12,wantRev=c.wet>0;
+  if(c.pan)ensurePan();
+  if(wantRev)ensureRev();
+  const panOk=!!(c.pan&&fx.pn);
+  if(panOk&&!fx.panOn){fx.warm.connect(fx.pn);fx.panOn=true}
+  if(wantRev&&!fx.revOn){fx.warm.connect(fx.conv);fx.revOn=true}
+  fx.dir.gain.setTargetAtTime(c.pan&&!panOk?1:c.dir,t,k);
+  if(fx.pg)fx.pg.gain.setTargetAtTime(panOk?c.pan*1.25:0,t,k);
+  if(fx.wet){fx.wet.gain.setTargetAtTime(c.wet,t,k);fx.wlp.frequency.setTargetAtTime(c.wlp,t,k)}
   fx.warm.frequency.setTargetAtTime(c.warm,t,k);
+  if(!panOk&&fx.panOn){fx.panOn=false;setTimeout(()=>{if(!fx.panOn)try{fx.warm.disconnect(fx.pn)}catch{}},700)}
+  if(!wantRev&&fx.revOn){fx.revOn=false;setTimeout(()=>{if(!fx.revOn)try{fx.warm.disconnect(fx.conv)}catch{}},1000)}
 }
 function syncFx(){
   [...$('fxseg').children].forEach((b,j)=>b.setAttribute('aria-pressed',j===ST.fx));
@@ -621,7 +686,7 @@ $('favOnly').onclick=()=>{favOnly=!favOnly;$('favOnly').classList.toggle('on',fa
 
 /* визуализация вместо обложки */
 const cv=$('viz'),cx=cv.getContext('2d'),data=new Uint8Array(128),tmp=new Uint8Array(128);
-function fit(){const r=cv.getBoundingClientRect(),d=optOn?1:(window.devicePixelRatio||1);cv.width=Math.round(r.width*d);cv.height=Math.round(r.height*d)}
+function fit(){const r=cv.getBoundingClientRect(),d=optOn?1:Math.min(window.devicePixelRatio||1,coarse?1.5:3);cv.width=Math.round(r.width*d);cv.height=Math.round(r.height*d)}
 addEventListener('resize',fit);fit();
 let bt=0;const pk=new Float32Array(48),coverEl=$('cover'),ambEl=$('amb');
 /* ===== Фон, который танцует под бит (WebGL) ===== */
@@ -686,7 +751,7 @@ function bgInit(){
 }
 function bgFit(){
   if(optOn)return;
-  const sc=Math.min(window.devicePixelRatio||1,1.5)*.5;
+  const sc=coarse?.3:Math.min(window.devicePixelRatio||1,1.5)*.5;
   bgc.width=Math.max(2,Math.round(innerWidth*sc));bgc.height=Math.max(2,Math.round(innerHeight*sc));
   if(gl)gl.viewport(0,0,bgc.width,bgc.height);
 }
@@ -720,6 +785,7 @@ function bgStep(t){
 function frame(t){
   requestAnimationFrame(frame);
   if(optOn){if(t-lastDraw<41)return;lastDraw=t;if(audio.paused&&!hot)return}
+  else if(coarse){if(t-lastDraw<30)return;lastDraw=t}
   const W=cv.width,H=cv.height,d=W/300,N=optOn?28:48;
   if(!audio.paused&&an){an.getByteFrequencyData(tmp);for(let i=0;i<128;i++)data[i]=tmp[i]}
   else if(!audio.paused){for(let i=0;i<128;i++)data[i]=110+90*Math.sin(t/260+i*.4)*Math.sin(t/900+i*.1)}
