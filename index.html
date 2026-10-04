@@ -261,7 +261,7 @@ function probeDuration(url){
    чтобы не отбирать у него канал (раньше все треки запрашивались одновременно). */
 const metaQ=[];let metaBusy=0,metaReady=false;
 function updateMeta(t){
-  $('title').textContent=t.title;$('artist').textContent=t.artist;document.title=`${t.title} — ${t.artist}`;
+  $('title').textContent=t.title;$('artist').textContent=t._err||t.artist;document.title=`${t.title} — ${t.artist}`;
   if('mediaSession' in navigator&&window.MediaMetadata)navigator.mediaSession.metadata=new MediaMetadata({title:t.title,artist:t.artist});
 }
 function queueMeta(t,front){
@@ -441,7 +441,7 @@ function render(){
 }
 
 function load(i,play){
-  idx=i;const t=tracks[i];
+  idx=i;const t=tracks[i];t._err='';
   const mt=document.querySelector('.meta');mt.classList.remove('swap');void mt.offsetWidth;mt.classList.add('swap');
   audio.src=t.url;applyRate();
   $('title').textContent=t.title;$('artist').textContent=t.artist;
@@ -471,15 +471,29 @@ function prev(){
 }
 let wantPlay=false,healed=false;
 async function healLibrary(){ /* файл не найден (переименован/удалён): пересобираем список из реальной папки */
-  const wasPlaying=wantPlay||!audio.paused;
+  const wasPlaying=wantPlay||!audio.paused,snap=tracks.slice(),sIdx=idx;
   $('artist').textContent='Файл не найден — обновляю список…';
   tracks.length=0;idx=-1;metaQ.length=0;warmUrl='';list.innerHTML='';
   await loadLibrary(true);
+  if(!tracks.length&&snap.length){ /* обновить не удалось: возвращаем прежний список, чтобы не остаться ни с чем */
+    const why=$('artist').textContent;
+    tracks.push(...snap);render();load(Math.max(0,sIdx),false);
+    $('artist').textContent=why||'Файл не найден';
+    return;
+  }
   if(wasPlaying&&tracks.length&&idx>=0)load(idx,true);
 }
-audio.addEventListener('error',()=>{
-  if(healed||!audio.getAttribute('src')||!tracks[idx])return;
-  healed=true;healLibrary();
+/* показываем РЕАЛЬНУЮ причину, а не молчим: 404 (нет файла) или файл найден, но браузер не может его воспроизвести */
+audio.addEventListener('error',async()=>{
+  const src=audio.getAttribute('src'),t=tracks[idx];
+  if(!src||!t)return;
+  let st;try{st=(await fetch(src,{method:'HEAD',cache:'no-cache'})).status}catch{st=0}
+  const code=audio.error?audio.error.code:0;
+  console.error('Не удалось воспроизвести',src,'HTTP',st,'MediaError',code);
+  if((st===404||st===403)&&!healed){healed=true;healLibrary();return}
+  $('artist').textContent=t._err=st===200||st===206
+    ?`Файл найден, но не воспроизводится (код ${code}: ${code===4?'формат не поддерживается или файл повреждён':'ошибка декодирования или сети'})`
+    :st===0?'Нет связи с сервером':`Не удалось открыть «${t.key}»: HTTP ${st}`;
 });
 function wake(){initAudio();if(ac&&ac.state!=='running')ac.resume()}
 function toggle(){if(!tracks.length)return;if(audio.paused){wake();audio.play().catch(()=>{})}else audio.pause()}
